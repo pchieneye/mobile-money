@@ -420,6 +420,10 @@ export class AMLService {
     try {
       const { AMLAlertModel } = await import("../models/amlAlert");
       const model = new AMLAlertModel();
+      const existing = await model.findByTransactionId(alert.transactionId);
+      if (existing) {
+        return;
+      }
       await model.create(alert);
     } catch (error) {
       console.error("Failed to persist AML alert to database:", error);

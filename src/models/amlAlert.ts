@@ -93,6 +93,30 @@ export class AMLAlertModel {
     return result.rows.length > 0 ? this.mapRow(result.rows[0]) : null;
   }
 
+  async findByTransactionId(transactionId: string): Promise<AMLAlert | null> {
+    const query = `
+      SELECT
+        id,
+        transaction_id AS "transactionId",
+        user_id AS "userId",
+        severity,
+        status,
+        rule_hits AS "ruleHits",
+        reasons,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        reviewed_at AS "reviewedAt",
+        reviewed_by AS "reviewedBy",
+        review_notes AS "reviewNotes"
+      FROM aml_alerts
+      WHERE transaction_id = $1
+      LIMIT 1
+    `;
+
+    const result = await pool.query(query, [transactionId]);
+    return result.rows.length > 0 ? this.mapRow(result.rows[0]) : null;
+  }
+
   async list(filter: AMLAlertFilter = {}): Promise<AMLAlertListResult> {
     const conditions: string[] = [];
     const params: any[] = [];
