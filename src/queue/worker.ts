@@ -8,6 +8,7 @@ import { TransactionModel, TransactionStatus } from "../models/transaction";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { StellarService } from "../services/stellar/stellarService";
 import { EmailService } from "../services/email";
+import { preComplianceService } from "../compliance/preCompliance";
 import { UserModel } from "../models/users";
 import { withRetry } from "../services/retry";
 import { WhatsappService } from "../services/whatsapp";
@@ -125,6 +126,36 @@ async function updateProgress(transactionId: string, progress: number) {
   }
 }
 
+async function runPreCompliance(transactionId: string): Promise<void> {
+  const transaction = await transactionModel.findById(transactionId);
+  if (!transaction) {
+    throw new Error(`Transaction ${transactionId} not found`);
+  }
+
+  const compliance = await preComplianceService.checkTransaction(transaction);
+  if (compliance.allowed) {
+    return;
+  }
+
+  const reason = compliance.reasons.length
+    ? compliance.reasons.join("; ")
+    : "Transaction blocked by compliance";
+
+  await Promise.allSettled([
+    transactionModel.addTags(transactionId, ["aml-flagged", "compliance-blocked"]),
+    transactionModel.patchMetadata(transactionId, {
+      compliance: {
+        blocked: true,
+        reasons: compliance.reasons,
+        severity: compliance.severity ?? "high",
+        alertId: compliance.alertId ?? null,
+      },
+    }),
+  ]);
+
+  throw new Error(`Pre-compliance blocked transaction: ${reason}`);
+}
+
 async function processTransaction(data: TransactionJobData): Promise<TransactionJobResult> {
   const {
     transactionId,
@@ -218,6 +249,7 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
 
     if (type === "deposit") {
       await updateProgress(transactionId, 20);
+      await runPreCompliance(transactionId);
 
       const mobileMoneyResult = await withRetry(async () => {
         const result = await mobileMoneyService.initiatePayment(
@@ -277,6 +309,7 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
       return { success: true, transactionId };
     } else {
       await updateProgress(transactionId, 20);
+      await runPreCompliance(transactionId);
 
       const mobileMoneyResult = await withRetry(async () => {
         const result = await mobileMoneyService.sendPayout(
